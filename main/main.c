@@ -1,7 +1,7 @@
 /*
  * ARQUIVO: main.c
  * PLACA: Franzininho WiFi Lab01 (ESP32-S2)
- * DESCRICAO: V34 - Tela Estável (Sem piscar) + Correção de Espelhamento
+ * DESCRICAO: V35 - Correção de Latência (Prioridade Turbo no Envio)
  */
 
 #include <stdio.h>
@@ -32,7 +32,7 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 
-static const char *TAG = "FRANZININHO_V34";
+static const char *TAG = "FRANZININHO_V35";
 
 // ==========================================================
 //  1. CONFIGURAÇÕES
@@ -44,7 +44,7 @@ static const char *TAG = "FRANZININHO_V34";
 #define TELEGRAM_CHAT_ID   "5578468807"
 
 // Pinos
-#define BUTTON1_GPIO 7    // TELEGRAM MANUAL + MOSTRAR UMIDADE
+#define BUTTON1_GPIO 7    
 #define BUTTON2_GPIO 6    
 #define BUTTON3_GPIO 5    
 #define BUTTON4_GPIO 4    
@@ -85,7 +85,7 @@ TaskHandle_t xDisplayTaskHandle = NULL;
 // Variáveis de Estado
 int global_temp = 0;
 int global_hum = 0;
-volatile bool mostrar_umidade = false; // Controle visual
+volatile bool mostrar_umidade = false; 
 
 char hist_alertas[5][32]; 
 int idx_alerta = 0;
@@ -120,7 +120,7 @@ static bool example_adc_calibration_init(adc_unit_t unit, adc_channel_t channel,
 }
 
 // ==========================================================
-//  4. FONTE OLED 8x8 (Com Símbolo de Grau)
+//  4. FONTE OLED 8x8 (MANTIDO DISPLAY V34)
 // ==========================================================
 const uint8_t font8x8_basic[][8] = {
     {0,0,0,0,0,0,0,0}, {0,24,60,60,24,24,0,24}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, {0,0,0,0,0,0,0,0}, 
@@ -131,7 +131,7 @@ const uint8_t font8x8_basic[][8] = {
     {60,102,102,60,102,102,60,0}, {60,102,102,62,6,6,60,0}, {0,24,24,0,0,24,24,0}, {0,0,0,0,0,0,0,0},
     {60,102,12,24,24,0,24,0}, {0,0,0,0,0,0,0,0},
     {60,102,110,110,110,96,62,0}, {24,60,102,102,126,102,102,0}, {124,102,102,124,102,102,124,0}, {60,102,96,96,96,102,60,0},
-    {120,108,102,102,102,108,120,0}, {126,96,96,124,96,96,126,0}, {126,96,96,124,96,96,96,0}, {60,102,96,110,102,102,60,0},
+    {120,108,102,102,102,108,120,0}, {126,96,96,124,96,96,126,0}, {126,96,96,124,96,96,124,0}, {60,102,96,110,102,102,60,0},
     {102,102,102,126,102,102,102,0}, {60,24,24,24,24,24,60,0}, {30,12,12,12,12,204,120,0}, {102,108,120,112,120,108,102,0},
     {96,96,96,96,96,96,126,0}, {99,119,127,107,99,99,99,0}, {102,118,126,126,110,102,102,0}, {60,102,102,102,102,102,60,0},
     {124,102,102,124,96,96,96,0}, {60,102,102,102,102,110,94,0}, {124,102,102,124,120,108,102,0}, {60,102,96,60,6,102,60,0},
@@ -141,7 +141,7 @@ const uint8_t font8x8_basic[][8] = {
 };
 
 // ==========================================================
-//  5. DRIVER OLED (CORRIGIDO A1/C8)
+//  5. DRIVER OLED (MANTIDO DISPLAY V34)
 // ==========================================================
 void i2c_init() {
     i2c_config_t conf = { .mode=I2C_MODE_MASTER, .sda_io_num=I2C_MASTER_SDA_IO, .scl_io_num=I2C_MASTER_SCL_IO, .sda_pullup_en=1, .scl_pullup_en=1, .master.clk_speed=400000 };
@@ -158,10 +158,10 @@ void oled_init() {
     oled_send(0xAE, 0); 
     oled_send(0x20, 0); oled_send(0x02, 0); 
     
-    // --- CORREÇÃO DE ROTAÇÃO E ESPELHAMENTO ---
-    oled_send(0xA1, 0); // A1: Desespelha horizontalmente (Arruma o "2")
-    oled_send(0xC8, 0); // C8: Orientação Vertical Padrão
-    // ------------------------------------------
+    // --- MANTENDO SUA CORREÇÃO A1/C8 ---
+    oled_send(0xA1, 0); 
+    oled_send(0xC8, 0); 
+    // -----------------------------------
 
     oled_send(0xDA, 0); oled_send(0x12, 0);
     oled_send(0x81, 0); oled_send(0xCF, 0);
@@ -238,16 +238,23 @@ void save_alert(int t, int h, char *tm) { snprintf(hist_alertas[idx_alerta % 5],
 void save_reading(int t, int h, char *tm) { snprintf(hist_leituras[idx_leitura % 5], 64, "%s %dC e %d%%", tm, t, h); idx_leitura++; }
 
 // ==========================================================
-//  7. TELEGRAM
+//  7. TELEGRAM (OTIMIZADO)
 // ==========================================================
 void send_telegram(const char *msg) {
-    esp_http_client_config_t cfg = { .url = "https://api.telegram.org/bot" TELEGRAM_BOT_TOKEN "/sendMessage", .transport_type = HTTP_TRANSPORT_OVER_SSL, .host = "api.telegram.org", .crt_bundle_attach = esp_crt_bundle_attach, .timeout_ms = 20000 };
+    esp_http_client_config_t cfg = { 
+        .url = "https://api.telegram.org/bot" TELEGRAM_BOT_TOKEN "/sendMessage", 
+        .transport_type = HTTP_TRANSPORT_OVER_SSL, 
+        .host = "api.telegram.org", 
+        .crt_bundle_attach = esp_crt_bundle_attach, 
+        .timeout_ms = 15000 // Reduzido de 20s para 15s
+    };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
     esp_http_client_set_header(client, "Content-Type", "application/json");
     char post[1024]; snprintf(post, sizeof(post), "{\"chat_id\":\"%s\",\"text\":\"%s\"}", TELEGRAM_CHAT_ID, msg);
     esp_http_client_set_post_field(client, post, strlen(post));
-    esp_http_client_perform(client); esp_http_client_cleanup(client);
+    esp_http_client_perform(client); 
+    esp_http_client_cleanup(client);
 }
 
 void telegram_task(void *pv) { 
@@ -257,9 +264,14 @@ void telegram_task(void *pv) {
     vTaskDelete(NULL); 
 }
 
+// CORREÇÃO CRÍTICA AQUI: AUMENTO DE PRIORIDADE
 void spawn_telegram(const char *msg) { 
     char *safe_msg = strdup(msg); 
-    if (safe_msg) xTaskCreate(telegram_task, "tg_send", 8192, (void *)safe_msg, 5, NULL); 
+    if (safe_msg) {
+        // MUDANÇA: Prioridade 10 (Muito Alta)
+        // Isso faz o envio "atropelar" qualquer outra coisa que esteja rodando
+        xTaskCreate(telegram_task, "tg_send", 8192, (void *)safe_msg, 10, NULL); 
+    }
 }
 
 esp_err_t _http_event_handler(esp_http_client_event_t *evt) { return ESP_OK; }
@@ -347,25 +359,20 @@ void display_task(void *arg) {
     const int CHAR_W_BIG = 16;
 
     while(1) {
-        oled_clear(); // Limpa tela
+        oled_clear(); 
 
         if(mostrar_umidade) {
-            // MOSTRA "XX %"
             if (global_temp == 0) sprintf(big_str, "-- %%");
             else sprintf(big_str, "%d %%", global_hum);
         } else {
-            // MOSTRA "XX *"
             if (global_temp == 0) sprintf(big_str, "-- *"); 
             else sprintf(big_str, "%d *", global_temp);
         }
 
-        // Centraliza
         int len = strlen(big_str);
         int pos_x = (OLED_WIDTH - (len * CHAR_W_BIG)) / 2;
-        
         oled_print_big(3, pos_x, big_str);
 
-        // AUMENTADO PARA 2000ms (2 SEGUNDOS) PARA NÃO PISCAR
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
     }
 }
@@ -374,7 +381,6 @@ void display_task(void *arg) {
 //  10. TASKS E LÓGICA
 // ==========================================================
 
-// BOTAO 1: TELEGRAM + MOSTRA UMIDADE POR 3 SEG
 void btn1_task(void *arg) {
     xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, 0, 1, portMAX_DELAY);
     int h, t; char m[256]; char tm[32];
@@ -382,26 +388,17 @@ void btn1_task(void *arg) {
     while(1) {
         if(gpio_get_level(BUTTON1_GPIO)==0) {
             gpio_set_level(LED_MSG_GPIO, 1);
-            
-            // 1. Telegram
             if(read_dht11(&h,&t)==0) {
                 global_temp = t; global_hum = h; get_time_str(tm, 32, true);
                 snprintf(m, 256, "✅ Leitura Manual:\n🌡 Temp: %d°C\n💧 Umid: %d%%\n🕒 %s", t, h, tm);
                 spawn_telegram(m);
             }
-
-            // 2. Mostra Umidade (Notifica Display para atualizar AGORA)
             mostrar_umidade = true;
             if(xDisplayTaskHandle) xTaskNotifyGive(xDisplayTaskHandle);
-            
             while(gpio_get_level(BUTTON1_GPIO)==0) { vTaskDelay(10); } 
-            
             vTaskDelay(pdMS_TO_TICKS(3000)); 
-            
-            // Volta para temperatura
             mostrar_umidade = false;
             if(xDisplayTaskHandle) xTaskNotifyGive(xDisplayTaskHandle);
-
             gpio_set_level(LED_MSG_GPIO, 0); 
         } 
         vTaskDelay(100);
@@ -470,7 +467,6 @@ void dht_auto_task(void *arg) {
             get_time_str(tm, 32, true); get_time_str(tm_short, 32, false); 
             save_reading(t, h, tm_short);
 
-            // ATUALIZA A TELA QUANDO LER NOVO DADO
             if(xDisplayTaskHandle) xTaskNotifyGive(xDisplayTaskHandle);
 
             if((t > TEMP_ALERTA_HIGH || h > HUM_ALERTA_HIGH) && !alerta) {
@@ -528,13 +524,13 @@ void ldr_task(void *arg) {
                 gpio_set_level(LED_NIGHT_GPIO, 1);
                 get_time_str(tm, 32, true);
                 snprintf(m, 100, "🌑 Anoiteceu! (%d mV)\n🕒 %s", voltage_media, tm);
-                spawn_telegram(m);
+                spawn_telegram(m); // AGORA TEM ALTA PRIORIDADE E VAI RAPIDO
                 escuro = true;
             } else if(voltage_media > LDR_AMANHECER_MV && escuro) {
                 gpio_set_level(LED_NIGHT_GPIO, 0);
                 get_time_str(tm, 32, true);
                 snprintf(m, 100, "☀ Amanheceu! (%d mV)\n🕒 %s", voltage_media, tm);
-                spawn_telegram(m);
+                spawn_telegram(m); // AGORA TEM ALTA PRIORIDADE E VAI RAPIDO
                 escuro = false;
             }
         }
@@ -553,7 +549,7 @@ void boot_task(void *arg) {
         time(&now); localtime_r(&now, &timeinfo);
     }
     xTaskCreate(display_task, "disp", 4096, NULL, 5, &xDisplayTaskHandle);
-    spawn_telegram("SISTEMA FRANZININHO V34 INICIADO");
+    spawn_telegram("SISTEMA FRANZININHO V35 INICIADO");
     vTaskDelete(NULL);
 }
 
@@ -587,14 +583,12 @@ void app_main(void) {
 
     xTaskCreate(boot_task, "boot", 8192, NULL, 5, NULL);
     xTaskCreate(dht_auto_task, "dht", 4096, NULL, 5, NULL);
-    xTaskCreate(ldr_task, "ldr", 4096, NULL, 6, NULL); // Prioridade aumentada para 6
+    xTaskCreate(ldr_task, "ldr", 4096, NULL, 6, NULL); 
     xTaskCreate(btn1_task, "b1", 4096, NULL, 5, NULL);
     xTaskCreate(btn2_task, "b2", 4096, NULL, 5, NULL);
     xTaskCreate(btn3_task, "b3", 8192, NULL, 5, NULL);
     xTaskCreate(btn4_task, "b4", 8192, NULL, 5, NULL);
     
-    xTaskCreate(telegram_rx_task, "tg_rx", 8192, NULL, 5, NULL);
-}   
-
-
- 
+    // CORREÇÃO CRÍTICA 2: RECEBIMENTO TEM PRIORIDADE BAIXA (1)
+    xTaskCreate(telegram_rx_task, "tg_rx", 8192, NULL, 1, NULL);
+}
